@@ -207,7 +207,9 @@ async function buildDeckInPowerPoint(deck, { appendMode, includeNotes }, onSlide
     slides.load("items/id");
     await context.sync();
 
-    const originalSlideIds = appendMode ? [] : slides.items.map((s) => s.id);
+    // slides.add() always appends to the end, so the presentation's
+    // original slides stay at indices [0, startCount) the whole time we're
+    // adding new ones after them.
     const startCount = slides.items.length;
 
     for (let i = 0; i < deck.length; i++) {
@@ -273,12 +275,16 @@ async function buildDeckInPowerPoint(deck, { appendMode, includeNotes }, onSlide
     }
 
     // Remove the original slides now that the new ones are safely in place
-    // (PowerPoint always requires at least one slide to exist).
+    // (PowerPoint always requires at least one slide to exist). Deleting
+    // index 0 repeatedly works because each removal shifts the next
+    // original slide into position 0 — this avoids SlideCollection.getItem,
+    // which has proven unreliable on PowerPoint on the web.
     if (!appendMode) {
-      originalSlideIds.forEach((id) => {
-        slides.getItem(id).delete();
-      });
-      await context.sync();
+      for (let i = 0; i < startCount; i++) {
+        slides.getItemAt(0).delete();
+        // eslint-disable-next-line no-await-in-loop
+        await context.sync();
+      }
     }
   });
 }
