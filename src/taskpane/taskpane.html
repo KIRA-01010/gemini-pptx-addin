@@ -91,12 +91,13 @@
         </label>
       </div>
 
-      <div class="field checkbox-field">
-        <label>
-          <input type="checkbox" id="appendMode" />
-          Add to end of current presentation (unchecked replaces all slides)
-        </label>
-      </div>
+      <p class="hint" style="margin-top: -4px;">
+        New slides are added to the end of your current presentation. If you
+        started from a blank deck, just delete the leftover blank first
+        slide afterward — deleting slides automatically turned out to be
+        unreliable on PowerPoint for the web, so this add-in doesn't attempt
+        it.
+      </p>
 
       <button id="generateBtn" class="btn primary full">
         <span class="btn-label">Generate slides</span>
@@ -113,6 +114,6 @@
     </footer>
   </div>
 
-  <script src="./taskpane.js?v=2"></script>
+  <script src="./taskpane.js?v=3"></script>
 </body>
 </html>

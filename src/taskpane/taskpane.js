@@ -13,7 +13,7 @@ function cacheElements() {
     "apiKey", "toggleKeyVisibility",
     "modelName", "customModel", "saveSettings",
     "topic", "slideCount", "tone",
-    "includeNotes", "appendMode",
+    "includeNotes",
     "generateBtn", "errorMsg", "progressList",
   ].forEach((id) => (els[id] = document.getElementById(id)));
 }
@@ -201,15 +201,13 @@ const SLIDE = {
   width: 860,
 };
 
-async function buildDeckInPowerPoint(deck, { appendMode, includeNotes }, onSlideDone) {
+async function buildDeckInPowerPoint(deck, { includeNotes }, onSlideDone) {
   await PowerPoint.run(async (context) => {
     const slides = context.presentation.slides;
     slides.load("items/id");
     await context.sync();
 
-    // slides.add() always appends to the end, so the presentation's
-    // original slides stay at indices [0, startCount) the whole time we're
-    // adding new ones after them.
+    // slides.add() always appends to the end.
     const startCount = slides.items.length;
 
     for (let i = 0; i < deck.length; i++) {
@@ -274,18 +272,6 @@ async function buildDeckInPowerPoint(deck, { appendMode, includeNotes }, onSlide
       onSlideDone(i);
     }
 
-    // Remove the original slides now that the new ones are safely in place
-    // (PowerPoint always requires at least one slide to exist). Deleting
-    // index 0 repeatedly works because each removal shifts the next
-    // original slide into position 0 — this avoids SlideCollection.getItem,
-    // which has proven unreliable on PowerPoint on the web.
-    if (!appendMode) {
-      for (let i = 0; i < startCount; i++) {
-        slides.getItemAt(0).delete();
-        // eslint-disable-next-line no-await-in-loop
-        await context.sync();
-      }
-    }
   });
 }
 
@@ -302,7 +288,6 @@ async function handleGenerateClick() {
   const slideCount = Math.max(1, Math.min(20, parseInt(els.slideCount.value, 10) || 6));
   const tone = els.tone.value;
   const includeNotes = els.includeNotes.checked;
-  const appendMode = els.appendMode.checked;
 
   if (!apiKey) {
     showError("Add your Gemini API key in Settings first.");
@@ -339,7 +324,7 @@ async function handleGenerateClick() {
     resetProgressList(deck.map((s, i) => s.title || `Slide ${i + 1}`));
     deck.forEach((_, i) => markProgress(i, "active"));
 
-    await buildDeckInPowerPoint(deck, { appendMode, includeNotes }, (i) => markProgress(i, "done"));
+    await buildDeckInPowerPoint(deck, { includeNotes }, (i) => markProgress(i, "done"));
   } catch (err) {
     console.error(err);
     const detail = describeOfficeError(err);
