@@ -130,7 +130,6 @@ ${includeNotes ? '- Each slide has "notes": 1-3 sentences of speaker talking poi
     body: JSON.stringify({
       contents: [{ role: "user", parts: [{ text: prompt }] }],
       generationConfig: {
-        temperature: 0.7,
         responseMimeType: "application/json",
       },
     }),
