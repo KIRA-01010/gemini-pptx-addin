@@ -227,42 +227,44 @@ async function buildDeckInPowerPoint(deck, { appendMode, includeNotes }, onSlide
       const newSlide = slides.items[newIndex];
       const shapes = newSlide.shapes;
 
-      const titleBox = shapes.addTextBox(slideData.title, {
-        left: SLIDE.left,
-        top: SLIDE.titleTop,
-        width: SLIDE.width,
-        height: SLIDE.titleHeight,
-      });
+      const titleBox = shapes.addTextBox(slideData.title);
+      titleBox.left = SLIDE.left;
+      titleBox.top = SLIDE.titleTop;
+      titleBox.width = SLIDE.width;
+      titleBox.height = SLIDE.titleHeight;
       titleBox.name = "GeminiSlides_Title";
       titleBox.textFrame.textRange.font.size = 28;
       titleBox.textFrame.textRange.font.bold = true;
+      // eslint-disable-next-line no-await-in-loop
+      await context.sync();
 
       const bodyText = slideData.bullets.map((b) => `•  ${b}`).join("\n");
       if (bodyText) {
-        const bodyBox = shapes.addTextBox(bodyText, {
-          left: SLIDE.left,
-          top: SLIDE.bodyTop,
-          width: SLIDE.width,
-          height: SLIDE.bodyHeight,
-        });
+        const bodyBox = shapes.addTextBox(bodyText);
+        bodyBox.left = SLIDE.left;
+        bodyBox.top = SLIDE.bodyTop;
+        bodyBox.width = SLIDE.width;
+        bodyBox.height = SLIDE.bodyHeight;
         bodyBox.name = "GeminiSlides_Body";
         bodyBox.textFrame.textRange.font.size = 18;
         bodyBox.textFrame.wordWrap = true;
+        // eslint-disable-next-line no-await-in-loop
+        await context.sync();
       }
 
       // The PowerPoint JS API does not currently expose the real speaker-notes
       // pane, so as a practical stand-in we add a small on-slide note instead.
       if (includeNotes && slideData.notes) {
-        const notesBox = shapes.addTextBox(`Notes: ${slideData.notes}`, {
-          left: SLIDE.left,
-          top: SLIDE.notesTop,
-          width: SLIDE.width,
-          height: SLIDE.notesHeight,
-        });
+        const notesBox = shapes.addTextBox(`Notes: ${slideData.notes}`);
+        notesBox.left = SLIDE.left;
+        notesBox.top = SLIDE.notesTop;
+        notesBox.width = SLIDE.width;
+        notesBox.height = SLIDE.notesHeight;
         notesBox.name = "GeminiSlides_Notes";
         notesBox.textFrame.textRange.font.size = 10;
         notesBox.textFrame.textRange.font.italic = true;
-        notesBox.textFrame.textRange.font.color = "#6E6B85";
+        // eslint-disable-next-line no-await-in-loop
+        await context.sync();
       }
 
       // eslint-disable-next-line no-await-in-loop
@@ -334,11 +336,26 @@ async function handleGenerateClick() {
     await buildDeckInPowerPoint(deck, { appendMode, includeNotes }, (i) => markProgress(i, "done"));
   } catch (err) {
     console.error(err);
-    showError(err.message || "Something went wrong generating the deck.");
+    const detail = describeOfficeError(err);
+    showError(detail);
     els.progressList.querySelectorAll("li:not(.done)").forEach((li) => li.classList.add("error"));
   } finally {
     setBusy(false);
   }
+}
+
+// Office.js errors (OfficeExtension.Error) carry a generic "GeneralException"
+// name/message but often have far more detail in .code and .debugInfo — pull
+// that out so the on-screen error is actually actionable.
+function describeOfficeError(err) {
+  const parts = [];
+  if (err?.code) parts.push(`[${err.code}]`);
+  parts.push(err?.message || "Something went wrong generating the deck.");
+  if (err?.debugInfo?.errorLocation) {
+    parts.push(`(at ${err.debugInfo.errorLocation})`);
+  }
+  console.error("Office error debugInfo:", err?.debugInfo);
+  return parts.join(" ");
 }
 
 // ---------------------------------------------------------------------------
