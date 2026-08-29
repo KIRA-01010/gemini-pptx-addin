@@ -136,6 +136,12 @@ ${includeNotes ? '- Each slide has "notes": 1-3 sentences of speaker talking poi
   });
 
   if (!response.ok) {
+    if (response.status === 429) {
+      const errBody = await response.text().catch(() => "");
+      const retryMatch = errBody.match(/retry in ([\d.]+)s/i);
+      const waitMsg = retryMatch ? ` Try again in about ${Math.ceil(parseFloat(retryMatch[1]))}s.` : " Wait a bit and try again.";
+      throw new Error(`You've hit Gemini's free-tier rate limit.${waitMsg}`);
+    }
     const errBody = await response.text().catch(() => "");
     throw new Error(
       `Gemini API error (${response.status}). ${extractApiErrorMessage(errBody)}`
@@ -245,18 +251,20 @@ async function buildDeckInPowerPoint(deck, { includeNotes, accentColor }, onSlid
     for (let i = 0; i < deck.length; i++) {
       const slideData = deck[i];
 
-      // Add a new blank slide at the end, then re-measure the actual slide
-      // count rather than trusting index arithmetic — that's what caused
-      // content to land on the wrong slide previously.
+      // Add a new blank slide at the end, then ask for the live count
+      // directly via getCount() rather than reloading/reading .items —
+      // reusing that array across many loop iterations is a likely source
+      // of the stale-index bug that caused content to land on the wrong
+      // slide previously.
       slides.add(addOptions);
       // eslint-disable-next-line no-await-in-loop
       await context.sync();
 
-      slides.load("items/id");
+      const countResult = slides.getCount();
       // eslint-disable-next-line no-await-in-loop
       await context.sync();
 
-      const newIndex = slides.items.length - 1;
+      const newIndex = countResult.value - 1;
       const newSlide = slides.getItemAt(newIndex);
       const shapes = newSlide.shapes;
       const isTitleSlide = i === 0;
