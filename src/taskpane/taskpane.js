@@ -265,62 +265,6 @@ async function findBlankLayoutOptions() {
   return addOptions;
 }
 
-// ---------------------------------------------------------------------------
-// Canvas-rendered background art
-// ---------------------------------------------------------------------------
-// The PowerPoint API can't create gradient fills, so we render real
-// gradients + soft glow shapes with Canvas (which has no such limitation)
-// and embed the result as a single background image instead.
-
-function hexToRgb(hex) {
-  const clean = hex.replace("#", "");
-  const n = parseInt(clean, 16);
-  return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
-}
-
-function rgba(hex, alpha) {
-  const { r, g, b } = hexToRgb(hex);
-  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
-}
-
-function renderGradientBackgroundPng(accentColor, { dark = false } = {}) {
-  const canvas = document.createElement("canvas");
-  const width = 1600;
-  const height = 900;
-  canvas.width = width;
-  canvas.height = height;
-  const ctx = canvas.getContext("2d");
-
-  // Base diagonal gradient.
-  const base = ctx.createLinearGradient(0, 0, width, height);
-  if (dark) {
-    base.addColorStop(0, "#14131F");
-    base.addColorStop(1, "#1E1B33");
-  } else {
-    base.addColorStop(0, "#FFFFFF");
-    base.addColorStop(1, rgba(accentColor, 0.08));
-  }
-  ctx.fillStyle = base;
-  ctx.fillRect(0, 0, width, height);
-
-  // Soft glow blobs using radial gradients — real, smooth gradients that
-  // the PowerPoint shape API cannot produce natively.
-  const glows = [
-    { x: width * 0.88, y: height * 0.08, r: width * 0.45, alpha: dark ? 0.35 : 0.28 },
-    { x: width * 0.08, y: height * 1.05, r: width * 0.4, alpha: dark ? 0.22 : 0.18 },
-    { x: width * 0.6, y: height * 0.9, r: width * 0.25, alpha: dark ? 0.15 : 0.12 },
-  ];
-  glows.forEach((g) => {
-    const grad = ctx.createRadialGradient(g.x, g.y, 0, g.x, g.y, g.r);
-    grad.addColorStop(0, rgba(accentColor, g.alpha));
-    grad.addColorStop(1, rgba(accentColor, 0));
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, width, height);
-  });
-
-  return canvas.toDataURL("image/png").split(",")[1];
-}
-
 async function addOneSlide(slideData, index, addOptions, { includeNotes, template, accentColor }) {
   const isTitleSlide = index === 0;
 
@@ -335,49 +279,21 @@ async function addOneSlide(slideData, index, addOptions, { includeNotes, templat
     newIndex = countResult.value - 1;
   });
 
-  // Step 2 (title slide only): attempt a real gradient background image.
-  // This is isolated in its own try/catch so that if addImage() misbehaves
-  // on this host (it has a documented history of web-specific issues), it
-  // can't take the rest of the slide's content down with it.
-  let imageSucceeded = false;
-  if (isTitleSlide && template !== "bold") {
-    try {
-      const dataUrl = renderGradientBackgroundPng(accentColor, { dark: template === "dark" });
-      await PowerPoint.run(async (context) => {
-        const shapes = context.presentation.slides.getItemAt(newIndex).shapes;
-        const bg = shapes.addImage(dataUrl);
-        bg.left = 0;
-        bg.top = 0;
-        bg.width = SLIDE.width;
-        bg.height = SLIDE.height;
-        bg.name = "GeminiSlides_BackgroundImage";
-        await context.sync();
-      });
-      imageSucceeded = true;
-    } catch (e) {
-      console.warn("Gradient background image failed, falling back to a flat shape:", e);
-      imageSucceeded = false;
-    }
-  }
+  // NOTE: PowerPoint.ShapeCollection has no addImage() method (confirmed —
+  // it exists on Excel's ShapeCollection but not PowerPoint's), so real
+  // images/gradients are not achievable here. Visual richness comes from
+  // bold, layered geometric shapes instead — see drawDecorativeShapes().
 
-  // Step 3: draw the rest of the slide's shapes in its own isolated batch.
+  // Step 2: draw the rest of the slide's shapes in its own isolated batch.
   await PowerPoint.run(async (context) => {
     const shapes = context.presentation.slides.getItemAt(newIndex).shapes;
-
-    if (isTitleSlide && !imageSucceeded) {
-      // Fallback: flat color background if the image insert failed above.
-      const bg = shapes.addGeometricShape(PowerPoint.GeometricShapeType.rectangle);
-      Object.assign(bg, { left: 0, top: 0, width: SLIDE.width, height: SLIDE.height });
-      bg.name = "GeminiSlides_Background";
-      flatFill(bg, template === "dark" ? COLORS.darkBg : COLORS.white);
-    }
 
     const drawFn = TEMPLATES[template] || TEMPLATES.minimal;
     drawFn(shapes, slideData, {
       isTitleSlide,
       slideNumber: index + 1,
       accentColor,
-      skipBackground: isTitleSlide && imageSucceeded,
+      skipBackground: false,
     });
 
     // The PowerPoint JS API does not currently expose the real speaker-notes
@@ -422,32 +338,53 @@ function drawBadge(shapes, slideNumber, { left, top, fillColor, textColor }) {
     PowerPoint.ParagraphHorizontalAlignment.center;
 }
 
+function shadeColor(hex, percent) {
+  // percent: -1 (black) to +1 (white); 0 = unchanged.
+  const { r, g, b } = hexToRgb(hex);
+  const mix = (channel) =>
+    percent < 0
+      ? Math.round(channel * (1 + percent))
+      : Math.round(channel + (255 - channel) * percent);
+  const clamp = (n) => Math.max(0, Math.min(255, n));
+  const toHex = (n) => clamp(n).toString(16).padStart(2, "0");
+  return `#${toHex(mix(r))}${toHex(mix(g))}${toHex(mix(b))}`;
+}
+
+function hexToRgb(hex) {
+  const clean = hex.replace("#", "");
+  const n = parseInt(clean, 16);
+  return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
+}
+
 function drawDecorativeBlobs(shapes, accentColor, corner = "topRight") {
-  // A soft cluster of overlapping, semi-transparent circles — a stand-in
-  // for the gradient/imagery a real design tool would use, built entirely
-  // from solid-fill shapes (the only fill type the JS API can actually set).
+  // A bold, layered color-block accent — two overlapping, mostly-opaque
+  // rectangles in two shades of the accent color. Built only from
+  // rectangles and solid fills, both proven reliable today, rather than
+  // gambling on unconfirmed shape types or rotation.
+  const lightShade = shadeColor(accentColor, 0.35);
+  const darkShade = shadeColor(accentColor, -0.25);
+
   const specs =
     corner === "topRight"
       ? [
-          { left: 740, top: -70, size: 280 },
-          { left: 850, top: 60, size: 150 },
-          { left: 660, top: 30, size: 100 },
+          { left: SLIDE.width - 260, top: -40, width: 300, height: 300, color: lightShade, transparency: 0.15 },
+          { left: SLIDE.width - 150, top: 40, width: 170, height: 170, color: darkShade, transparency: 0.05 },
         ]
       : [
-          { left: -60, top: 380, size: 260 },
-          { left: 120, top: 460, size: 140 },
+          { left: -80, top: SLIDE.height - 260, width: 280, height: 280, color: lightShade, transparency: 0.2 },
+          { left: 30, top: SLIDE.height - 150, width: 150, height: 150, color: accentColor, transparency: 0.1 },
         ];
-  const transparencies = [0.55, 0.4, 0.25];
+
   specs.forEach((s, idx) => {
-    const blob = shapes.addGeometricShape(PowerPoint.GeometricShapeType.oval);
-    blob.left = s.left;
-    blob.top = s.top;
-    blob.width = s.size;
-    blob.height = s.size;
-    blob.name = `GeminiSlides_Blob${corner}${idx}`;
-    blob.fill.setSolidColor(accentColor);
-    blob.fill.transparency = transparencies[idx] ?? 0.5;
-    blob.lineFormat.visible = false;
+    const block = shapes.addGeometricShape(PowerPoint.GeometricShapeType.rectangle);
+    block.left = s.left;
+    block.top = s.top;
+    block.width = s.width;
+    block.height = s.height;
+    block.name = `GeminiSlides_Accent${corner}${idx}`;
+    block.fill.setSolidColor(s.color);
+    block.fill.transparency = s.transparency;
+    block.lineFormat.visible = false;
   });
 }
 
