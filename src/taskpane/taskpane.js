@@ -131,6 +131,7 @@ ${includeNotes ? '- Each slide has "notes": 1-3 sentences of speaker talking poi
       contents: [{ role: "user", parts: [{ text: prompt }] }],
       generationConfig: {
         responseMimeType: "application/json",
+        maxOutputTokens: 4096,
       },
     }),
   });
@@ -149,14 +150,24 @@ ${includeNotes ? '- Each slide has "notes": 1-3 sentences of speaker talking poi
   }
 
   const data = await response.json();
-  const text = data?.candidates?.[0]?.content?.parts?.map((p) => p.text || "").join("") || "";
+  const candidate = data?.candidates?.[0];
+  const text = candidate?.content?.parts?.map((p) => p.text || "").join("") || "";
 
   if (!text) {
     const blockReason = data?.promptFeedback?.blockReason;
+    const finishReason = candidate?.finishReason;
     throw new Error(
       blockReason
         ? `Gemini did not return content (blocked: ${blockReason}).`
+        : finishReason
+        ? `Gemini did not return content (finish reason: ${finishReason}).`
         : "Gemini returned an empty response."
+    );
+  }
+
+  if (candidate?.finishReason === "MAX_TOKENS") {
+    throw new Error(
+      "Gemini's response was cut off before finishing (hit the token limit). Try fewer slides or shorter bullets."
     );
   }
 
@@ -180,7 +191,11 @@ function parseSlideJson(text) {
   try {
     deck = JSON.parse(cleaned);
   } catch (e) {
-    throw new Error("Couldn't parse Gemini's response as JSON. Try again or switch models.");
+    console.error("Raw Gemini response that failed to parse:", text);
+    const snippet = cleaned.slice(0, 180).replace(/\s+/g, " ");
+    throw new Error(
+      `Couldn't parse Gemini's response as JSON: ${e.message}. Response started with: "${snippet}${cleaned.length > 180 ? "…" : ""}"`
+    );
   }
   if (!Array.isArray(deck) || deck.length === 0) {
     throw new Error("Gemini's response wasn't a non-empty array of slides.");
