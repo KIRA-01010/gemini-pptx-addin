@@ -379,6 +379,16 @@ async function buildDeckInPowerPoint(deck, { includeNotes, accentColor }, onSlid
     // eslint-disable-next-line no-await-in-loop
     await addOneSlide(deck[i], i, addOptions, { includeNotes, accentColor });
     onSlideDone(i);
+
+    // PowerPoint on the web appears to need a moment to fully persist a
+    // slide's content server-side before it's safe to start the next one —
+    // a resolved await only confirms the client-side call returned, not
+    // that the backend has caught up. This pause is a deliberate, brute
+    // force mitigation for that lag.
+    if (i < deck.length - 1) {
+      // eslint-disable-next-line no-await-in-loop
+      await new Promise((resolve) => setTimeout(resolve, 700));
+    }
   }
 }
 
