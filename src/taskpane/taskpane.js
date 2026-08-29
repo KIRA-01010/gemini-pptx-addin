@@ -204,24 +204,40 @@ const SLIDE = {
 async function buildDeckInPowerPoint(deck, { includeNotes }, onSlideDone) {
   await PowerPoint.run(async (context) => {
     const slides = context.presentation.slides;
-    slides.load("items/id");
+
+    // Look up a "Blank" layout so new slides don't inherit title/subtitle
+    // placeholder shapes that visually clash with our own text boxes.
+    const slideMasters = context.presentation.slideMasters;
+    slideMasters.load("items/id");
+    await context.sync();
+    slideMasters.items.forEach((m) => m.layouts.load("items/id,items/name"));
     await context.sync();
 
-    // slides.add() always appends to the end.
-    const startCount = slides.items.length;
+    let addOptions;
+    outer: for (const master of slideMasters.items) {
+      for (const layout of master.layouts.items) {
+        if (/blank/i.test(layout.name)) {
+          addOptions = { slideMasterId: master.id, layoutId: layout.id };
+          break outer;
+        }
+      }
+    }
 
     for (let i = 0; i < deck.length; i++) {
       const slideData = deck[i];
 
-      // Add a new blank slide at the end of the deck, then get a fresh,
-      // properly bound reference to it via getItemAt() — indexing into a
-      // previously-loaded .items array (the old approach here) produces a
-      // reference that PowerPoint on the web can fail to resolve later.
-      slides.add();
+      // Add a new blank slide at the end, then re-measure the actual slide
+      // count rather than trusting index arithmetic — that's what caused
+      // content to land on the wrong slide previously.
+      slides.add(addOptions);
       // eslint-disable-next-line no-await-in-loop
       await context.sync();
 
-      const newIndex = startCount + i;
+      slides.load("items/id");
+      // eslint-disable-next-line no-await-in-loop
+      await context.sync();
+
+      const newIndex = slides.items.length - 1;
       const newSlide = slides.getItemAt(newIndex);
       const shapes = newSlide.shapes;
 
