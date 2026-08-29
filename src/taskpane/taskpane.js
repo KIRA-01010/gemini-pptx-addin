@@ -213,18 +213,16 @@ async function buildDeckInPowerPoint(deck, { includeNotes }, onSlideDone) {
     for (let i = 0; i < deck.length; i++) {
       const slideData = deck[i];
 
-      // Add a new blank slide at the end of the deck.
+      // Add a new blank slide at the end of the deck, then get a fresh,
+      // properly bound reference to it via getItemAt() — indexing into a
+      // previously-loaded .items array (the old approach here) produces a
+      // reference that PowerPoint on the web can fail to resolve later.
       slides.add();
       // eslint-disable-next-line no-await-in-loop
       await context.sync();
 
-      // Re-load to get a handle on the slide we just added.
-      slides.load("items/id");
-      // eslint-disable-next-line no-await-in-loop
-      await context.sync();
-
       const newIndex = startCount + i;
-      const newSlide = slides.items[newIndex];
+      const newSlide = slides.getItemAt(newIndex);
       const shapes = newSlide.shapes;
 
       const titleBox = shapes.addTextBox(slideData.title);
