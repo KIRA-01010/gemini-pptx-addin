@@ -233,8 +233,6 @@ async function buildDeckInPowerPoint(deck, { includeNotes }, onSlideDone) {
       titleBox.name = "GeminiSlides_Title";
       titleBox.textFrame.textRange.font.size = 28;
       titleBox.textFrame.textRange.font.bold = true;
-      // eslint-disable-next-line no-await-in-loop
-      await context.sync();
 
       const bodyText = slideData.bullets.map((b) => `•  ${b}`).join("\n");
       if (bodyText) {
@@ -246,8 +244,6 @@ async function buildDeckInPowerPoint(deck, { includeNotes }, onSlideDone) {
         bodyBox.name = "GeminiSlides_Body";
         bodyBox.textFrame.textRange.font.size = 18;
         bodyBox.textFrame.wordWrap = true;
-        // eslint-disable-next-line no-await-in-loop
-        await context.sync();
       }
 
       // The PowerPoint JS API does not currently expose the real speaker-notes
@@ -261,10 +257,11 @@ async function buildDeckInPowerPoint(deck, { includeNotes }, onSlideDone) {
         notesBox.name = "GeminiSlides_Notes";
         notesBox.textFrame.textRange.font.size = 10;
         notesBox.textFrame.textRange.font.italic = true;
-        // eslint-disable-next-line no-await-in-loop
-        await context.sync();
       }
 
+      // Single sync for all three shapes on this slide — reusing a shape
+      // reference across multiple separate syncs is what caused the
+      // "InvalidParam passed to GetItem(id)" error seen earlier.
       // eslint-disable-next-line no-await-in-loop
       await context.sync();
       onSlideDone(i);
