@@ -12,7 +12,7 @@ function cacheElements() {
     "settingsToggle", "settingsPanel",
     "apiKey", "toggleKeyVisibility",
     "modelName", "customModel", "saveSettings",
-    "topic", "slideCount", "tone",
+    "topic", "slideCount", "tone", "accentColor",
     "includeNotes",
     "generateBtn", "errorMsg", "progressList",
   ].forEach((id) => (els[id] = document.getElementById(id)));
@@ -191,17 +191,36 @@ function parseSlideJson(text) {
 // ---------------------------------------------------------------------------
 // Layout constants for a standard 13.33" x 7.5" (widescreen) slide, in points.
 const SLIDE = {
-  titleTop: 40,
-  titleHeight: 70,
-  bodyTop: 130,
-  bodyHeight: 330,
-  notesTop: 470,
-  notesHeight: 50,
-  left: 50,
-  width: 860,
+  width: 960,
+  height: 540,
+  accentBarHeight: 8,
+  titleTop: 55,
+  titleHeight: 65,
+  ruleTop: 122,
+  ruleHeight: 3,
+  ruleWidth: 90,
+  bodyTop: 145,
+  bodyHeight: 320,
+  notesTop: 478,
+  notesHeight: 40,
+  left: 55,
+  contentWidth: 850,
+  badgeSize: 30,
 };
 
-async function buildDeckInPowerPoint(deck, { includeNotes }, onSlideDone) {
+const COLORS = {
+  dark: "#1C1B29",
+  body: "#3F3D56",
+  secondary: "#6E6B85",
+  white: "#FFFFFF",
+};
+
+function flatFill(shape, color) {
+  shape.fill.setSolidColor(color);
+  shape.lineFormat.visible = false;
+}
+
+async function buildDeckInPowerPoint(deck, { includeNotes, accentColor }, onSlideDone) {
   await PowerPoint.run(async (context) => {
     const slides = context.presentation.slides;
 
@@ -240,26 +259,94 @@ async function buildDeckInPowerPoint(deck, { includeNotes }, onSlideDone) {
       const newIndex = slides.items.length - 1;
       const newSlide = slides.getItemAt(newIndex);
       const shapes = newSlide.shapes;
+      const isTitleSlide = i === 0;
 
-      const titleBox = shapes.addTextBox(slideData.title);
-      titleBox.left = SLIDE.left;
-      titleBox.top = SLIDE.titleTop;
-      titleBox.width = SLIDE.width;
-      titleBox.height = SLIDE.titleHeight;
-      titleBox.name = "GeminiSlides_Title";
-      titleBox.textFrame.textRange.font.size = 28;
-      titleBox.textFrame.textRange.font.bold = true;
+      // Accent bar across the top — added first so it sits behind the text
+      // boxes added after it (new shapes stack on top of earlier ones).
+      const accentBar = shapes.addGeometricShape(PowerPoint.GeometricShapeType.rectangle);
+      accentBar.left = 0;
+      accentBar.top = 0;
+      accentBar.width = SLIDE.width;
+      accentBar.height = isTitleSlide ? SLIDE.accentBarHeight * 2 : SLIDE.accentBarHeight;
+      accentBar.name = "GeminiSlides_AccentBar";
+      flatFill(accentBar, accentColor);
 
-      const bodyText = slideData.bullets.map((b) => `•  ${b}`).join("\n");
-      if (bodyText) {
-        const bodyBox = shapes.addTextBox(bodyText);
-        bodyBox.left = SLIDE.left;
-        bodyBox.top = SLIDE.bodyTop;
-        bodyBox.width = SLIDE.width;
-        bodyBox.height = SLIDE.bodyHeight;
-        bodyBox.name = "GeminiSlides_Body";
-        bodyBox.textFrame.textRange.font.size = 18;
-        bodyBox.textFrame.wordWrap = true;
+      if (isTitleSlide) {
+        // Title slide: big centered title, colored subtitle below.
+        const titleBox = shapes.addTextBox(slideData.title);
+        titleBox.left = 80;
+        titleBox.top = 190;
+        titleBox.width = SLIDE.width - 160;
+        titleBox.height = 110;
+        titleBox.name = "GeminiSlides_Title";
+        titleBox.textFrame.textRange.font.size = 40;
+        titleBox.textFrame.textRange.font.bold = true;
+        titleBox.textFrame.textRange.font.color = COLORS.dark;
+        titleBox.textFrame.textRange.paragraphFormat.horizontalAlignment =
+          PowerPoint.ParagraphHorizontalAlignment.center;
+
+        const subtitle = slideData.bullets[0] || "";
+        if (subtitle) {
+          const subtitleBox = shapes.addTextBox(subtitle);
+          subtitleBox.left = 80;
+          subtitleBox.top = 300;
+          subtitleBox.width = SLIDE.width - 160;
+          subtitleBox.height = 50;
+          subtitleBox.name = "GeminiSlides_Subtitle";
+          subtitleBox.textFrame.textRange.font.size = 20;
+          subtitleBox.textFrame.textRange.font.italic = true;
+          subtitleBox.textFrame.textRange.font.color = accentColor;
+          subtitleBox.textFrame.textRange.paragraphFormat.horizontalAlignment =
+            PowerPoint.ParagraphHorizontalAlignment.center;
+        }
+      } else {
+        // Content slide: colored title, thin divider rule, bullet body.
+        const titleBox = shapes.addTextBox(slideData.title);
+        titleBox.left = SLIDE.left;
+        titleBox.top = SLIDE.titleTop;
+        titleBox.width = SLIDE.contentWidth;
+        titleBox.height = SLIDE.titleHeight;
+        titleBox.name = "GeminiSlides_Title";
+        titleBox.textFrame.textRange.font.size = 28;
+        titleBox.textFrame.textRange.font.bold = true;
+        titleBox.textFrame.textRange.font.color = COLORS.dark;
+
+        const rule = shapes.addGeometricShape(PowerPoint.GeometricShapeType.rectangle);
+        rule.left = SLIDE.left;
+        rule.top = SLIDE.ruleTop;
+        rule.width = SLIDE.ruleWidth;
+        rule.height = SLIDE.ruleHeight;
+        rule.name = "GeminiSlides_Rule";
+        flatFill(rule, accentColor);
+
+        const bodyText = slideData.bullets.map((b) => `•  ${b}`).join("\n");
+        if (bodyText) {
+          const bodyBox = shapes.addTextBox(bodyText);
+          bodyBox.left = SLIDE.left;
+          bodyBox.top = SLIDE.bodyTop;
+          bodyBox.width = SLIDE.contentWidth;
+          bodyBox.height = SLIDE.bodyHeight;
+          bodyBox.name = "GeminiSlides_Body";
+          bodyBox.textFrame.textRange.font.size = 18;
+          bodyBox.textFrame.textRange.font.color = COLORS.body;
+          bodyBox.textFrame.wordWrap = true;
+        }
+
+        // Small colored slide-number badge, bottom-right corner.
+        const badge = shapes.addGeometricShape(PowerPoint.GeometricShapeType.oval);
+        badge.left = SLIDE.width - SLIDE.left - SLIDE.badgeSize + 20;
+        badge.top = SLIDE.height - SLIDE.badgeSize - 25;
+        badge.width = SLIDE.badgeSize;
+        badge.height = SLIDE.badgeSize;
+        badge.name = "GeminiSlides_PageBadge";
+        flatFill(badge, accentColor);
+        badge.textFrame.textRange.text = String(i + 1);
+        badge.textFrame.textRange.font.size = 13;
+        badge.textFrame.textRange.font.bold = true;
+        badge.textFrame.textRange.font.color = COLORS.white;
+        badge.textFrame.verticalAlignment = PowerPoint.TextVerticalAlignment.middleCentered;
+        badge.textFrame.textRange.paragraphFormat.horizontalAlignment =
+          PowerPoint.ParagraphHorizontalAlignment.center;
       }
 
       // The PowerPoint JS API does not currently expose the real speaker-notes
@@ -268,11 +355,12 @@ async function buildDeckInPowerPoint(deck, { includeNotes }, onSlideDone) {
         const notesBox = shapes.addTextBox(`Notes: ${slideData.notes}`);
         notesBox.left = SLIDE.left;
         notesBox.top = SLIDE.notesTop;
-        notesBox.width = SLIDE.width;
+        notesBox.width = SLIDE.contentWidth;
         notesBox.height = SLIDE.notesHeight;
         notesBox.name = "GeminiSlides_Notes";
         notesBox.textFrame.textRange.font.size = 10;
         notesBox.textFrame.textRange.font.italic = true;
+        notesBox.textFrame.textRange.font.color = COLORS.secondary;
       }
 
       // Single sync for all three shapes on this slide — reusing a shape
@@ -298,6 +386,7 @@ async function handleGenerateClick() {
   const topic = els.topic.value.trim();
   const slideCount = Math.max(1, Math.min(20, parseInt(els.slideCount.value, 10) || 6));
   const tone = els.tone.value;
+  const accentColor = els.accentColor.value;
   const includeNotes = els.includeNotes.checked;
 
   if (!apiKey) {
@@ -335,7 +424,7 @@ async function handleGenerateClick() {
     resetProgressList(deck.map((s, i) => s.title || `Slide ${i + 1}`));
     deck.forEach((_, i) => markProgress(i, "active"));
 
-    await buildDeckInPowerPoint(deck, { includeNotes }, (i) => markProgress(i, "done"));
+    await buildDeckInPowerPoint(deck, { includeNotes, accentColor }, (i) => markProgress(i, "done"));
   } catch (err) {
     console.error(err);
     const detail = describeOfficeError(err);
