@@ -329,9 +329,43 @@ function drawBadge(shapes, slideNumber, { left, top, fillColor, textColor }) {
     PowerPoint.ParagraphHorizontalAlignment.center;
 }
 
+function drawDecorativeBlobs(shapes, accentColor, corner = "topRight") {
+  // A soft cluster of overlapping, semi-transparent circles — a stand-in
+  // for the gradient/imagery a real design tool would use, built entirely
+  // from solid-fill shapes (the only fill type the JS API can actually set).
+  const specs =
+    corner === "topRight"
+      ? [
+          { left: 740, top: -70, size: 280 },
+          { left: 850, top: 60, size: 150 },
+          { left: 660, top: 30, size: 100 },
+        ]
+      : [
+          { left: -60, top: 380, size: 260 },
+          { left: 120, top: 460, size: 140 },
+        ];
+  const transparencies = [0.88, 0.8, 0.7];
+  specs.forEach((s, idx) => {
+    const blob = shapes.addGeometricShape(PowerPoint.GeometricShapeType.oval);
+    blob.left = s.left;
+    blob.top = s.top;
+    blob.width = s.size;
+    blob.height = s.size;
+    blob.name = `GeminiSlides_Blob${corner}${idx}`;
+    blob.fill.setSolidColor(accentColor);
+    blob.fill.transparency = transparencies[idx] ?? 0.85;
+    blob.lineFormat.visible = false;
+  });
+}
+
 const TEMPLATES = {
   // --- Minimal: colored top bar, dark title, short accent rule, plain bullets.
   minimal(shapes, slideData, { isTitleSlide, slideNumber, accentColor }) {
+    if (isTitleSlide) {
+      drawDecorativeBlobs(shapes, accentColor, "topRight");
+      drawDecorativeBlobs(shapes, accentColor, "bottomLeft");
+    }
+
     const accentBar = shapes.addGeometricShape(PowerPoint.GeometricShapeType.rectangle);
     accentBar.left = 0;
     accentBar.top = 0;
@@ -417,6 +451,8 @@ const TEMPLATES = {
   // --- Card Layout: each bullet rendered as its own tinted card.
   card(shapes, slideData, { isTitleSlide, slideNumber, accentColor }) {
     if (isTitleSlide) {
+      drawDecorativeBlobs(shapes, accentColor, "topRight");
+      drawDecorativeBlobs(shapes, accentColor, "bottomLeft");
       const rule = shapes.addGeometricShape(PowerPoint.GeometricShapeType.rectangle);
       Object.assign(rule, { left: SLIDE.width / 2 - 60, top: 270, width: 120, height: 4 });
       rule.name = "GeminiSlides_Rule";
@@ -482,6 +518,8 @@ const TEMPLATES = {
     flatFill(bg, COLORS.darkBg);
 
     if (isTitleSlide) {
+      drawDecorativeBlobs(shapes, accentColor, "topRight");
+      drawDecorativeBlobs(shapes, accentColor, "bottomLeft");
       drawCenteredTitle(shapes, slideData, accentColor, COLORS.white);
       return;
     }
