@@ -226,19 +226,15 @@ function flatFill(shape, color) {
   shape.lineFormat.visible = false;
 }
 
-async function buildDeckInPowerPoint(deck, { includeNotes, accentColor }, onSlideDone) {
+async function findBlankLayoutOptions() {
+  let addOptions;
   await PowerPoint.run(async (context) => {
-    const slides = context.presentation.slides;
-
-    // Look up a "Blank" layout so new slides don't inherit title/subtitle
-    // placeholder shapes that visually clash with our own text boxes.
     const slideMasters = context.presentation.slideMasters;
     slideMasters.load("items/id");
     await context.sync();
     slideMasters.items.forEach((m) => m.layouts.load("items/id,items/name"));
     await context.sync();
 
-    let addOptions;
     outer: for (const master of slideMasters.items) {
       for (const layout of master.layouts.items) {
         if (/blank/i.test(layout.name)) {
@@ -247,139 +243,143 @@ async function buildDeckInPowerPoint(deck, { includeNotes, accentColor }, onSlid
         }
       }
     }
+  });
+  return addOptions;
+}
 
-    for (let i = 0; i < deck.length; i++) {
-      const slideData = deck[i];
+async function addOneSlide(slideData, index, addOptions, { includeNotes, accentColor }) {
+  await PowerPoint.run(async (context) => {
+    const slides = context.presentation.slides;
 
-      // Add a new blank slide at the end, then ask for the live count
-      // directly via getCount() rather than reloading/reading .items —
-      // reusing that array across many loop iterations is a likely source
-      // of the stale-index bug that caused content to land on the wrong
-      // slide previously.
-      slides.add(addOptions);
-      // eslint-disable-next-line no-await-in-loop
-      await context.sync();
+    // Each slide gets its own fully independent PowerPoint.run() call —
+    // sharing one long-lived context across many add()+sync() cycles in a
+    // loop is what caused content to intermittently land on the wrong
+    // slide. A fresh, isolated batch per slide sidesteps that.
+    slides.add(addOptions);
+    await context.sync();
 
-      const countResult = slides.getCount();
-      // eslint-disable-next-line no-await-in-loop
-      await context.sync();
+    const countResult = slides.getCount();
+    await context.sync();
 
-      const newIndex = countResult.value - 1;
-      const newSlide = slides.getItemAt(newIndex);
-      const shapes = newSlide.shapes;
-      const isTitleSlide = i === 0;
+    const newIndex = countResult.value - 1;
+    const newSlide = slides.getItemAt(newIndex);
+    const shapes = newSlide.shapes;
+    const isTitleSlide = index === 0;
 
-      // Accent bar across the top — added first so it sits behind the text
-      // boxes added after it (new shapes stack on top of earlier ones).
-      const accentBar = shapes.addGeometricShape(PowerPoint.GeometricShapeType.rectangle);
-      accentBar.left = 0;
-      accentBar.top = 0;
-      accentBar.width = SLIDE.width;
-      accentBar.height = isTitleSlide ? SLIDE.accentBarHeight * 2 : SLIDE.accentBarHeight;
-      accentBar.name = "GeminiSlides_AccentBar";
-      flatFill(accentBar, accentColor);
+    // Accent bar across the top — added first so it sits behind the text
+    // boxes added after it (new shapes stack on top of earlier ones).
+    const accentBar = shapes.addGeometricShape(PowerPoint.GeometricShapeType.rectangle);
+    accentBar.left = 0;
+    accentBar.top = 0;
+    accentBar.width = SLIDE.width;
+    accentBar.height = isTitleSlide ? SLIDE.accentBarHeight * 2 : SLIDE.accentBarHeight;
+    accentBar.name = "GeminiSlides_AccentBar";
+    flatFill(accentBar, accentColor);
 
-      if (isTitleSlide) {
-        // Title slide: big centered title, colored subtitle below.
-        const titleBox = shapes.addTextBox(slideData.title);
-        titleBox.left = 80;
-        titleBox.top = 190;
-        titleBox.width = SLIDE.width - 160;
-        titleBox.height = 110;
-        titleBox.name = "GeminiSlides_Title";
-        titleBox.textFrame.textRange.font.size = 40;
-        titleBox.textFrame.textRange.font.bold = true;
-        titleBox.textFrame.textRange.font.color = COLORS.dark;
-        titleBox.textFrame.textRange.paragraphFormat.horizontalAlignment =
-          PowerPoint.ParagraphHorizontalAlignment.center;
+    if (isTitleSlide) {
+      // Title slide: big centered title, colored subtitle below.
+      const titleBox = shapes.addTextBox(slideData.title);
+      titleBox.left = 80;
+      titleBox.top = 190;
+      titleBox.width = SLIDE.width - 160;
+      titleBox.height = 110;
+      titleBox.name = "GeminiSlides_Title";
+      titleBox.textFrame.textRange.font.size = 40;
+      titleBox.textFrame.textRange.font.bold = true;
+      titleBox.textFrame.textRange.font.color = COLORS.dark;
+      titleBox.textFrame.textRange.paragraphFormat.horizontalAlignment =
+        PowerPoint.ParagraphHorizontalAlignment.center;
 
-        const subtitle = slideData.bullets[0] || "";
-        if (subtitle) {
-          const subtitleBox = shapes.addTextBox(subtitle);
-          subtitleBox.left = 80;
-          subtitleBox.top = 300;
-          subtitleBox.width = SLIDE.width - 160;
-          subtitleBox.height = 50;
-          subtitleBox.name = "GeminiSlides_Subtitle";
-          subtitleBox.textFrame.textRange.font.size = 20;
-          subtitleBox.textFrame.textRange.font.italic = true;
-          subtitleBox.textFrame.textRange.font.color = accentColor;
-          subtitleBox.textFrame.textRange.paragraphFormat.horizontalAlignment =
-            PowerPoint.ParagraphHorizontalAlignment.center;
-        }
-      } else {
-        // Content slide: colored title, thin divider rule, bullet body.
-        const titleBox = shapes.addTextBox(slideData.title);
-        titleBox.left = SLIDE.left;
-        titleBox.top = SLIDE.titleTop;
-        titleBox.width = SLIDE.contentWidth;
-        titleBox.height = SLIDE.titleHeight;
-        titleBox.name = "GeminiSlides_Title";
-        titleBox.textFrame.textRange.font.size = 28;
-        titleBox.textFrame.textRange.font.bold = true;
-        titleBox.textFrame.textRange.font.color = COLORS.dark;
-
-        const rule = shapes.addGeometricShape(PowerPoint.GeometricShapeType.rectangle);
-        rule.left = SLIDE.left;
-        rule.top = SLIDE.ruleTop;
-        rule.width = SLIDE.ruleWidth;
-        rule.height = SLIDE.ruleHeight;
-        rule.name = "GeminiSlides_Rule";
-        flatFill(rule, accentColor);
-
-        const bodyText = slideData.bullets.map((b) => `•  ${b}`).join("\n");
-        if (bodyText) {
-          const bodyBox = shapes.addTextBox(bodyText);
-          bodyBox.left = SLIDE.left;
-          bodyBox.top = SLIDE.bodyTop;
-          bodyBox.width = SLIDE.contentWidth;
-          bodyBox.height = SLIDE.bodyHeight;
-          bodyBox.name = "GeminiSlides_Body";
-          bodyBox.textFrame.textRange.font.size = 18;
-          bodyBox.textFrame.textRange.font.color = COLORS.body;
-          bodyBox.textFrame.wordWrap = true;
-        }
-
-        // Small colored slide-number badge, bottom-right corner.
-        const badge = shapes.addGeometricShape(PowerPoint.GeometricShapeType.oval);
-        badge.left = SLIDE.width - SLIDE.left - SLIDE.badgeSize + 20;
-        badge.top = SLIDE.height - SLIDE.badgeSize - 25;
-        badge.width = SLIDE.badgeSize;
-        badge.height = SLIDE.badgeSize;
-        badge.name = "GeminiSlides_PageBadge";
-        flatFill(badge, accentColor);
-        badge.textFrame.textRange.text = String(i + 1);
-        badge.textFrame.textRange.font.size = 13;
-        badge.textFrame.textRange.font.bold = true;
-        badge.textFrame.textRange.font.color = COLORS.white;
-        badge.textFrame.verticalAlignment = PowerPoint.TextVerticalAlignment.middleCentered;
-        badge.textFrame.textRange.paragraphFormat.horizontalAlignment =
+      const subtitle = slideData.bullets[0] || "";
+      if (subtitle) {
+        const subtitleBox = shapes.addTextBox(subtitle);
+        subtitleBox.left = 80;
+        subtitleBox.top = 300;
+        subtitleBox.width = SLIDE.width - 160;
+        subtitleBox.height = 50;
+        subtitleBox.name = "GeminiSlides_Subtitle";
+        subtitleBox.textFrame.textRange.font.size = 20;
+        subtitleBox.textFrame.textRange.font.italic = true;
+        subtitleBox.textFrame.textRange.font.color = accentColor;
+        subtitleBox.textFrame.textRange.paragraphFormat.horizontalAlignment =
           PowerPoint.ParagraphHorizontalAlignment.center;
       }
+    } else {
+      // Content slide: colored title, thin divider rule, bullet body.
+      const titleBox = shapes.addTextBox(slideData.title);
+      titleBox.left = SLIDE.left;
+      titleBox.top = SLIDE.titleTop;
+      titleBox.width = SLIDE.contentWidth;
+      titleBox.height = SLIDE.titleHeight;
+      titleBox.name = "GeminiSlides_Title";
+      titleBox.textFrame.textRange.font.size = 28;
+      titleBox.textFrame.textRange.font.bold = true;
+      titleBox.textFrame.textRange.font.color = COLORS.dark;
 
-      // The PowerPoint JS API does not currently expose the real speaker-notes
-      // pane, so as a practical stand-in we add a small on-slide note instead.
-      if (includeNotes && slideData.notes) {
-        const notesBox = shapes.addTextBox(`Notes: ${slideData.notes}`);
-        notesBox.left = SLIDE.left;
-        notesBox.top = SLIDE.notesTop;
-        notesBox.width = SLIDE.contentWidth;
-        notesBox.height = SLIDE.notesHeight;
-        notesBox.name = "GeminiSlides_Notes";
-        notesBox.textFrame.textRange.font.size = 10;
-        notesBox.textFrame.textRange.font.italic = true;
-        notesBox.textFrame.textRange.font.color = COLORS.secondary;
+      const rule = shapes.addGeometricShape(PowerPoint.GeometricShapeType.rectangle);
+      rule.left = SLIDE.left;
+      rule.top = SLIDE.ruleTop;
+      rule.width = SLIDE.ruleWidth;
+      rule.height = SLIDE.ruleHeight;
+      rule.name = "GeminiSlides_Rule";
+      flatFill(rule, accentColor);
+
+      const bodyText = slideData.bullets.map((b) => `•  ${b}`).join("\n");
+      if (bodyText) {
+        const bodyBox = shapes.addTextBox(bodyText);
+        bodyBox.left = SLIDE.left;
+        bodyBox.top = SLIDE.bodyTop;
+        bodyBox.width = SLIDE.contentWidth;
+        bodyBox.height = SLIDE.bodyHeight;
+        bodyBox.name = "GeminiSlides_Body";
+        bodyBox.textFrame.textRange.font.size = 18;
+        bodyBox.textFrame.textRange.font.color = COLORS.body;
+        bodyBox.textFrame.wordWrap = true;
       }
 
-      // Single sync for all three shapes on this slide — reusing a shape
-      // reference across multiple separate syncs is what caused the
-      // "InvalidParam passed to GetItem(id)" error seen earlier.
-      // eslint-disable-next-line no-await-in-loop
-      await context.sync();
-      onSlideDone(i);
+      // Small colored slide-number badge, bottom-right corner.
+      const badge = shapes.addGeometricShape(PowerPoint.GeometricShapeType.oval);
+      badge.left = SLIDE.width - SLIDE.left - SLIDE.badgeSize + 20;
+      badge.top = SLIDE.height - SLIDE.badgeSize - 25;
+      badge.width = SLIDE.badgeSize;
+      badge.height = SLIDE.badgeSize;
+      badge.name = "GeminiSlides_PageBadge";
+      flatFill(badge, accentColor);
+      badge.textFrame.textRange.text = String(index + 1);
+      badge.textFrame.textRange.font.size = 13;
+      badge.textFrame.textRange.font.bold = true;
+      badge.textFrame.textRange.font.color = COLORS.white;
+      badge.textFrame.verticalAlignment = PowerPoint.TextVerticalAlignment.middleCentered;
+      badge.textFrame.textRange.paragraphFormat.horizontalAlignment =
+        PowerPoint.ParagraphHorizontalAlignment.center;
     }
 
+    // The PowerPoint JS API does not currently expose the real speaker-notes
+    // pane, so as a practical stand-in we add a small on-slide note instead.
+    if (includeNotes && slideData.notes) {
+      const notesBox = shapes.addTextBox(`Notes: ${slideData.notes}`);
+      notesBox.left = SLIDE.left;
+      notesBox.top = SLIDE.notesTop;
+      notesBox.width = SLIDE.contentWidth;
+      notesBox.height = SLIDE.notesHeight;
+      notesBox.name = "GeminiSlides_Notes";
+      notesBox.textFrame.textRange.font.size = 10;
+      notesBox.textFrame.textRange.font.italic = true;
+      notesBox.textFrame.textRange.font.color = COLORS.secondary;
+    }
+
+    await context.sync();
   });
+}
+
+async function buildDeckInPowerPoint(deck, { includeNotes, accentColor }, onSlideDone) {
+  const addOptions = await findBlankLayoutOptions();
+
+  for (let i = 0; i < deck.length; i++) {
+    // eslint-disable-next-line no-await-in-loop
+    await addOneSlide(deck[i], i, addOptions, { includeNotes, accentColor });
+    onSlideDone(i);
+  }
 }
 
 // ---------------------------------------------------------------------------
